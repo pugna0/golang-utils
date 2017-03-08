@@ -12,7 +12,8 @@ import (
 func main() {
 	var wg sync.WaitGroup
 
-	consumer, avalibleBroker := initKafka([]string{"10.6.8.223:9092"})
+	consumer := initKafka([]string{"10.6.8.223:9092"})
+	avalibleBroker := findFirstAvalibleBroker([]string{"10.6.8.223:9092"})
 	if consumer == nil || avalibleBroker == nil {
 		fmt.Println("initialization Kafka failed")
 		return
@@ -21,9 +22,9 @@ func main() {
 
 	ch := make(chan *sarama.ConsumerMessage)
 	terminateCH := make(chan int64)
-
-	if err := consumeMessage(consumer, "go-kafka-123", &wg, ch, "pugna-group-123",
-		avalibleBroker, terminateCH); err != nil {
+	_, err := consumeMessage(consumer, "go-kafka-123", &wg, ch, "pugna-group-123",
+		avalibleBroker)
+	if err != nil {
 		fmt.Println("errors occur while consuming message from kafka")
 		fmt.Println(err)
 		return

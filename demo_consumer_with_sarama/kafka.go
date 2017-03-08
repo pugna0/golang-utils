@@ -9,23 +9,7 @@ import (
 
 // initKafka, nonautomatic committing consumer
 // return avalible broker for committing offset
-func initKafka(servers []string) (sarama.Consumer, *sarama.Broker) {
-
-	var avalibleBroker *sarama.Broker
-	for _, b := range servers {
-		tmpBroker := sarama.NewBroker(b)
-		tmpBroker.Open(nil)
-		if c, err := tmpBroker.Connected(); c {
-			avalibleBroker = tmpBroker
-			break
-		} else {
-			fmt.Println(err)
-		}
-	}
-	if avalibleBroker == nil {
-		fmt.Println("No avalible Broker in given parameters")
-		return nil, nil
-	}
+func initKafka(servers []string) sarama.Consumer {
 
 	config := sarama.NewConfig()
 	templateOffset := struct {
@@ -47,18 +31,19 @@ func initKafka(servers []string) (sarama.Consumer, *sarama.Broker) {
 	if err != nil {
 		panic(err)
 	}
-	return consumer, avalibleBroker
+	return consumer
 }
 
 func consumeMessage(consumer sarama.Consumer, topic string, wg *sync.WaitGroup,
 	recieveCH chan *sarama.ConsumerMessage, consumerGroup string,
-	avalibleBroker *sarama.Broker, terminateCH chan int64) (err error) {
+	avalibleBroker *sarama.Broker) (int64, error) {
 
 	// recieveCH should be closed by channel reader.
 	partitionList, err := consumer.Partitions(topic)
+	partitionNumbers := len(partitionList)
 	// recieveCH := make(chan *sarama.ConsumerMessage, partitionList)
 	if err != nil {
-		return
+		return 0, err
 		// panic(err)
 	} else {
 
@@ -117,12 +102,7 @@ func consumeMessage(consumer sarama.Consumer, topic string, wg *sync.WaitGroup,
 
 						fmt.Printf("Goroutine for consumer of partition %d is done.\n",
 							partitionNumber)
-					case _, opened := <-terminateCH:
-						if !opened {
-							wg.Done()
-							fmt.Println("recieve SIGTERM")
-							break consumerLoopInRoutine
-						}
+
 					}
 				}
 			}()
@@ -131,5 +111,42 @@ func consumeMessage(consumer sarama.Consumer, topic string, wg *sync.WaitGroup,
 			fmt.Println("add one routine")
 		}
 	}
-	return
+	return int64(partitionNumbers), nil
+}
+
+func findFirstAvalibleBroker(servers []string) *sarama.Broker {
+	var avalibleBroker *sarama.Broker
+	// defer avalibleBroker.Close()
+	for _, b := range servers {
+		tmpBroker := sarama.NewBroker(b)
+		tmpBroker.Open(nil)
+		if c, err := tmpBroker.Connected(); c {
+			avalibleBroker = tmpBroker
+			break
+		} else {
+			fmt.Printf("Broker %s is not avalibe, error msg: %s\n", b, err)
+		}
+	}
+	if avalibleBroker == nil {
+		fmt.Println("No avalible Broker in given parameters")
+		return nil
+	}
+	return avalibleBroker
+}
+
+func commitOffset(broker *sarama.Broker, topic string, consumerGroup string,
+	partition int32, offset int64) error {
+	offsetCommitRequest := new(sarama.OffsetCommitRequest)
+	offsetCommitRequest.ConsumerGroup = "pugna-group-123"
+	offsetCommitRequest.Version = 0
+	offsetCommitRequest.AddBlock(topic, partition, offset, time.Now().Unix(), "test-commiting")
+	fmt.Printf("offset: %d on partition: %d will be commited\n", offset, partition)
+	offsetCommitResponse, err_response := broker.CommitOffset(offsetCommitRequest)
+
+	if err_response != nil {
+		fmt.Println("offset committing failed")
+		fmt.Println(offsetCommitResponse)
+		return err_response
+	}
+	return nil
 }
